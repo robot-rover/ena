@@ -57,7 +57,7 @@ macro_rules! all_modes {
 fn basic() {
     all_modes! {
         S for UnitKey => {
-            let mut ut: UnificationTable<S> = UnificationTable::new();
+            let mut ut: UnificationTable<S, ()> = UnificationTable::new();
             let k1 = ut.new_key(());
             let k2 = ut.new_key(());
             assert_eq!(ut.unioned(k1, k2), false);
@@ -71,7 +71,7 @@ fn basic() {
 fn big_array() {
     all_modes! {
         S for UnitKey => {
-            let mut ut: UnificationTable<S> = UnificationTable::new();
+            let mut ut: UnificationTable<S, ()> = UnificationTable::new();
             let mut keys = Vec::new();
             const MAX: usize = 1 << 15;
 
@@ -217,7 +217,7 @@ fn big_array_bench_clone_Persistent(b: &mut Bencher) {
 fn even_odd() {
     all_modes! {
         S for UnitKey => {
-            let mut ut: UnificationTable<S> = UnificationTable::new();
+            let mut ut: UnificationTable<S, ()> = UnificationTable::new();
             let mut keys = Vec::new();
             const MAX: usize = 1 << 10;
 
@@ -263,7 +263,7 @@ impl EqUnifyValue for i32 {}
 fn unify_same_int_twice() {
     all_modes! {
         S for IntKey => {
-            let mut ut: UnificationTable<S> = UnificationTable::new();
+            let mut ut: UnificationTable<S, ()> = UnificationTable::new();
             let k1 = ut.new_key(None);
             let k2 = ut.new_key(None);
             assert!(ut.unify_var_value(k1, Some(22)).is_ok());
@@ -278,7 +278,7 @@ fn unify_same_int_twice() {
 fn unify_vars_then_int_indirect() {
     all_modes! {
         S for IntKey => {
-            let mut ut: UnificationTable<S> = UnificationTable::new();
+            let mut ut: UnificationTable<S, ()> = UnificationTable::new();
             let k1 = ut.new_key(None);
             let k2 = ut.new_key(None);
             assert!(ut.unify_var_var(k1, k2).is_ok());
@@ -292,7 +292,7 @@ fn unify_vars_then_int_indirect() {
 fn unify_vars_different_ints_1() {
     all_modes! {
         S for IntKey => {
-            let mut ut: UnificationTable<S> = UnificationTable::new();
+            let mut ut: UnificationTable<S, ()> = UnificationTable::new();
             let k1 = ut.new_key(None);
             let k2 = ut.new_key(None);
             assert!(ut.unify_var_var(k1, k2).is_ok());
@@ -306,7 +306,7 @@ fn unify_vars_different_ints_1() {
 fn unify_vars_different_ints_2() {
     all_modes! {
         S for IntKey => {
-            let mut ut: UnificationTable<S> = UnificationTable::new();
+            let mut ut: UnificationTable<S, ()> = UnificationTable::new();
             let k1 = ut.new_key(None);
             let k2 = ut.new_key(None);
             assert!(ut.unify_var_var(k2, k1).is_ok());
@@ -320,7 +320,7 @@ fn unify_vars_different_ints_2() {
 fn unify_distinct_ints_then_vars() {
     all_modes! {
         S for IntKey => {
-            let mut ut: UnificationTable<S> = UnificationTable::new();
+            let mut ut: UnificationTable<S, ()> = UnificationTable::new();
             let k1 = ut.new_key(None);
             let k2 = ut.new_key(None);
             assert!(ut.unify_var_value(k1, Some(22)).is_ok());
@@ -334,7 +334,7 @@ fn unify_distinct_ints_then_vars() {
 fn unify_root_value_1() {
     all_modes! {
         S for IntKey => {
-            let mut ut: UnificationTable<S> = UnificationTable::new();
+            let mut ut: UnificationTable<S, ()> = UnificationTable::new();
             let k1 = ut.new_key(None);
             let k2 = ut.new_key(None);
             let k3 = ut.new_key(None);
@@ -350,7 +350,7 @@ fn unify_root_value_1() {
 fn unify_root_value_2() {
     all_modes! {
         S for IntKey => {
-            let mut ut: UnificationTable<S> = UnificationTable::new();
+            let mut ut: UnificationTable<S, ()> = UnificationTable::new();
             let k1 = ut.new_key(None);
             let k2 = ut.new_key(None);
             let k3 = ut.new_key(None);
@@ -398,8 +398,9 @@ impl UnifyKey for OrderedKey {
 
 impl UnifyValue for OrderedRank {
     type Error = NoError;
+    type Context = ();
 
-    fn unify_values(value1: &Self, value2: &Self) -> Result<Self, NoError> {
+    fn unify_values(value1: &Self, value2: &Self, _contet: &mut ()) -> Result<Self, NoError> {
         Ok(OrderedRank(cmp::max(value1.0, value2.0)))
     }
 }
@@ -408,7 +409,7 @@ impl UnifyValue for OrderedRank {
 fn ordered_key() {
     all_modes! {
         S for OrderedKey => {
-            let mut ut: UnificationTable<S> = UnificationTable::new();
+            let mut ut: UnificationTable<S, ()> = UnificationTable::new();
 
             let k0_1 = ut.new_key(OrderedRank(0));
             let k0_2 = ut.new_key(OrderedRank(0));
@@ -463,7 +464,7 @@ fn ordered_key_k1() {
 fn clone_table() {
     all_modes! {
         S for IntKey => {
-            let mut ut: UnificationTable<S> = UnificationTable::new();
+            let mut ut: UnificationTable<S, ()> = UnificationTable::new();
             let k1 = ut.new_key(None);
             let k2 = ut.new_key(None);
             let k3 = ut.new_key(None);

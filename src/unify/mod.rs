@@ -31,9 +31,9 @@
 //! The best way to see how it is used is to read the `tests.rs` file;
 //! search for e.g. `UnitKey`.
 
-use std::fmt::Debug;
 use std::marker;
 use std::ops::Range;
+use std::{borrow::Borrow, fmt::Debug};
 
 use snapshot_vec::{self as sv, UndoLog};
 use undo_log::{UndoLogs, VecLog};
@@ -109,9 +109,15 @@ pub trait UnifyValue: Clone + Debug {
     /// methods on the unification table.
     type Error;
 
+    type Context: Debug + Clone;
+
     /// Given two values, produce a new value that combines them.
     /// If that is not possible, produce an error.
-    fn unify_values(value1: &Self, value2: &Self) -> Result<Self, Self::Error>;
+    fn unify_values(
+        value1: &Self,
+        value2: &Self,
+        context: &mut Self::Context,
+    ) -> Result<Self, Self::Error>;
 }
 
 /// A convenient helper for unification values which must be equal or
@@ -130,7 +136,9 @@ pub trait EqUnifyValue: Eq + Clone + Debug {}
 impl<T: EqUnifyValue> UnifyValue for T {
     type Error = (T, T);
 
-    fn unify_values(value1: &Self, value2: &Self) -> Result<Self, Self::Error> {
+    type Context = ();
+
+    fn unify_values(value1: &Self, value2: &Self, _context: &mut ()) -> Result<Self, Self::Error> {
         if value1 == value2 {
             Ok(value1.clone())
         } else {
@@ -174,14 +182,20 @@ pub struct VarValue<K: UnifyKey> {
 ///     cloning the table is an O(1) operation.
 ///   - This implies that ordinary operations are quite a bit slower though.
 ///   - Requires the `persistent` feature be selected in your Cargo.toml file.
-#[derive(Clone, Debug, Default)]
-pub struct UnificationTable<S: UnificationStoreBase> {
+#[derive(Clone, Debug)]
+pub struct UnificationTable<S: UnificationStoreBase, C>
+where
+    C: Borrow<<<S::Key as UnifyKey>::Value as UnifyValue>::Context>,
+{
     /// Indicates the current value of each key.
     values: S,
+    pub context: C,
 }
 
 pub type UnificationStorage<K> = Vec<VarValue<K>>;
-pub type UnificationTableStorage<K> = UnificationTable<InPlace<K, UnificationStorage<K>, ()>>;
+#[allow(type_alias_bounds)]
+pub type UnificationTableStorage<K: UnifyKey> =
+    UnificationTable<InPlace<K, UnificationStorage<K>, ()>, <K::Value as UnifyValue>::Context>;
 
 /// A unification table that uses an "in-place" vector.
 #[allow(type_alias_bounds)]
@@ -189,7 +203,7 @@ pub type InPlaceUnificationTable<
     K: UnifyKey,
     V: sv::VecLike<Delegate<K>> = Vec<VarValue<K>>,
     L = VecLog<UndoLog<Delegate<K>>>,
-> = UnificationTable<InPlace<K, V, L>>;
+> = UnificationTable<InPlace<K, V, L>, <K::Value as UnifyValue>::Context>;
 
 /// A unification table that uses a "persistent" vector.
 #[cfg(feature = "persistent")]
@@ -211,9 +225,9 @@ impl<K: UnifyKey> VarValue<K> {
 
     fn new(parent: K, value: K::Value, rank: u32) -> VarValue<K> {
         VarValue {
-            parent: parent, // this is a root
-            value: value,
-            rank: rank,
+            parent, // this is a root
+            value,
+            rank,
         }
     }
 
@@ -236,7 +250,10 @@ where
     pub fn with_log<'a, L>(
         &'a mut self,
         undo_log: L,
-    ) -> UnificationTable<InPlace<K, &'a mut UnificationStorage<K>, L>>
+    ) -> UnificationTable<
+        InPlace<K, &'a mut UnificationStorage<K>, L>,
+        &'a mut <K::Value as UnifyValue>::Context,
+    >
     where
         L: UndoLogs<sv::UndoLog<Delegate<K>>>,
     {
@@ -244,6 +261,7 @@ where
             values: InPlace {
                 values: self.values.values.with_log(undo_log),
             },
+            context: &mut self.context,
         }
     }
 }
@@ -253,13 +271,31 @@ where
 // other type parameter U, and we have no way to say
 // Option<U>:LatticeValue.
 
-impl<S: UnificationStoreBase + Default> UnificationTable<S> {
+impl<S: UnificationStoreBase + Default, C> Default for UnificationTable<S, C>
+where
+    C: Borrow<<<S::Key as UnifyKey>::Value as UnifyValue>::Context> + Default,
+{
+    fn default() -> Self {
+        UnificationTable {
+            values: S::default(),
+            context: Default::default(),
+        }
+    }
+}
+
+impl<S: UnificationStoreBase + Default, C> UnificationTable<S, C>
+where
+    C: Borrow<<<S::Key as UnifyKey>::Value as UnifyValue>::Context> + Default,
+{
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-impl<S: UnificationStore> UnificationTable<S> {
+impl<S: UnificationStore, C> UnificationTable<S, C>
+where
+    C: Borrow<<<S::Key as UnifyKey>::Value as UnifyValue>::Context>,
+{
     /// Starts a new snapshot. Each snapshot must be either
     /// rolled back or committed in a "LIFO" (stack) order.
     pub fn snapshot(&mut self) -> Snapshot<S> {
@@ -290,7 +326,10 @@ impl<S: UnificationStore> UnificationTable<S> {
     }
 }
 
-impl<S: UnificationStoreBase> UnificationTable<S> {
+impl<S: UnificationStoreBase, C> UnificationTable<S, C>
+where
+    C: Borrow<<<S::Key as UnifyKey>::Value as UnifyValue>::Context>,
+{
     /// Returns the number of keys created so far.
     pub fn len(&self) -> usize {
         self.values.len()
@@ -303,7 +342,10 @@ impl<S: UnificationStoreBase> UnificationTable<S> {
     }
 }
 
-impl<S: UnificationStoreMut> UnificationTable<S> {
+impl<S: UnificationStoreMut, C> UnificationTable<S, C>
+where
+    C: Borrow<<<S::Key as UnifyKey>::Value as UnifyValue>::Context>,
+{
     /// Creates a fresh key with the given value.
     pub fn new_key(&mut self, value: S::Value) -> S::Key {
         let len = self.values.len();
@@ -446,18 +488,19 @@ impl<S: UnificationStoreMut> UnificationTable<S> {
 /// ////////////////////////////////////////////////////////////////////////
 /// Public API
 
-impl<S, K, V> UnificationTable<S>
+impl<S, K, V, C> UnificationTable<S, C>
 where
     S: UnificationStoreBase<Key = K, Value = V>,
     K: UnifyKey<Value = V>,
-    V: UnifyValue,
+    V: UnifyValue<Context = C>,
+    C: Borrow<V::Context>,
 {
     /// Obtains current value for key without any pointer chasing; may return `None` if key has been union'd.
     #[inline]
     pub fn try_probe_value<'a, K1>(&'a self, id: K1) -> Option<&'a V>
-        where
-            K1: Into<K>,
-            K: 'a,
+    where
+        K1: Into<K>,
+        K: 'a,
     {
         let id = id.into();
         let v = self.value(id);
@@ -468,11 +511,12 @@ where
     }
 }
 
-impl<S, K, V> UnificationTable<S>
+impl<S, K, V, C> UnificationTable<S, C>
 where
     S: UnificationStoreMut<Key = K, Value = V>,
     K: UnifyKey<Value = V>,
-    V: UnifyValue,
+    V: UnifyValue<Context = C>,
+    C: Borrow<V::Context>,
 {
     /// Unions two keys without the possibility of failure; only
     /// applicable when unify values use `NoError` as their error
@@ -533,7 +577,11 @@ where
             return Ok(());
         }
 
-        let combined = V::unify_values(&self.value(root_a).value, &self.value(root_b).value)?;
+        let root_a_value = &self.values[root_a.index() as usize];
+        let root_b_value = &self.values[root_b.index() as usize];
+
+        let combined =
+            V::unify_values(&root_a_value.value, &root_b_value.value, &mut self.context)?;
 
         Ok(self.unify_roots(root_a, root_b, combined))
     }
@@ -546,7 +594,9 @@ where
     {
         let a_id = a_id.into();
         let root_a = self.uninlined_get_root_key(a_id);
-        let value = V::unify_values(&self.value(root_a).value, &b)?;
+
+        let root_a_value = &self.values[root_a.index() as usize];
+        let value = V::unify_values(&root_a_value.value, &b, &mut self.context)?;
         self.update_value(root_a, |node| node.value = value);
         Ok(())
     }
@@ -577,7 +627,9 @@ where
 impl UnifyValue for () {
     type Error = NoError;
 
-    fn unify_values(_: &(), _: &()) -> Result<(), NoError> {
+    type Context = ();
+
+    fn unify_values(_: &(), _: &(), _: &mut ()) -> Result<(), NoError> {
         Ok(())
     }
 }
@@ -585,11 +637,17 @@ impl UnifyValue for () {
 impl<V: UnifyValue> UnifyValue for Option<V> {
     type Error = V::Error;
 
-    fn unify_values(a: &Option<V>, b: &Option<V>) -> Result<Self, V::Error> {
+    type Context = V::Context;
+
+    fn unify_values(
+        a: &Option<V>,
+        b: &Option<V>,
+        context: &mut V::Context,
+    ) -> Result<Self, V::Error> {
         match (a, b) {
             (&None, &None) => Ok(None),
             (&Some(ref v), &None) | (&None, &Some(ref v)) => Ok(Some(v.clone())),
-            (&Some(ref a), &Some(ref b)) => match V::unify_values(a, b) {
+            (&Some(ref a), &Some(ref b)) => match V::unify_values(a, b, context) {
                 Ok(v) => Ok(Some(v)),
                 Err(err) => Err(err),
             },
