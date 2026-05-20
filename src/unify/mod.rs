@@ -610,6 +610,28 @@ where
         self.inlined_probe_value(id)
     }
 
+    pub fn probe_value_ref<'a, K1>(&'a mut self, id: K1) -> &'a V
+    where
+        K1: Into<K>,
+        K: 'a,
+    {
+        let id = id.into();
+        let id = self.inlined_get_root_key(id);
+        &self.value(id).value
+    }
+
+    pub fn probe_many_ref<'a, K1, const N: usize>(&'a mut self, ids: [K1; N]) -> [&'a V; N]
+    where
+        K1: Into<K>,
+        K: 'a,
+    {
+        let ids = ids.map(Into::into);
+        let roots = ids.map(|id| self.inlined_get_root_key(id));
+        let reborrow = &*self;
+        let values = roots.map(|root| &reborrow.value(root).value);
+        values
+    }
+
     // An always-inlined version of `probe_value`, for hot callsites.
     #[inline(always)]
     pub fn inlined_probe_value<K1>(&mut self, id: K1) -> V
