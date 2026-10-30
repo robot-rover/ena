@@ -620,6 +620,18 @@ where
         &self.value(id).value
     }
 
+    pub fn probe_many<'a, K1, const N: usize>(&'a mut self, ids: [K1; N]) -> [V; N]
+    where
+        K1: Into<K>,
+        K: 'a,
+    {
+        let ids = ids.map(Into::into);
+        let roots = ids.map(|id| self.inlined_get_root_key(id));
+        let reborrow = &*self;
+        let values = roots.map(|root| reborrow.value(root).value.clone());
+        values
+    }
+
     pub fn probe_many_ref<'a, K1, const N: usize>(&'a mut self, ids: [K1; N]) -> [&'a V; N]
     where
         K1: Into<K>,
